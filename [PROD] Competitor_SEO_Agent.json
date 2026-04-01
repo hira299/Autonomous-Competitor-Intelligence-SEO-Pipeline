@@ -1,0 +1,288 @@
+{
+  "name": "[PROD] Competitor_SEO_Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://n8n.io/blog/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -752,
+        48
+      ],
+      "id": "869b16eb-76ef-4014-a51c-00b92f45b20f",
+      "name": "[GET] Fetch_Competitor_Site",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// In a real environment, this would call an API like BrightData or ScrapingBee.\n// For now, we log the failure to our DLQ and halt.\nreturn [{\n  json: {\n    alert: \"FATAL: Target blocked the scraper. 403 Forbidden.\",\n    action: \"Proxy rotation initiated for next cron cycle.\",\n    failed_url: $node[\"[GET] Fetch_Competitor_Site\"].parameter[\"url\"]\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        144
+      ],
+      "id": "c1760377-4baf-41a0-b490-2ad0c9a16fba",
+      "name": "[WARN] Trigger_Proxy_Rotation"
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "text",
+              "cssSelector": "body"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -528,
+        -48
+      ],
+      "id": "2d7bae4f-ea5a-4826-824e-4b34c00b91c9",
+      "name": "[TRANSFORM] Extract_Text_Content"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\n// 1. Hunt down the actual string inside the Gemini payload\nlet rawText = item.text || \n              (item.content && item.content.parts && item.content.parts[0].text) || \n              item.output || \n              \"\";\n\nif (!rawText) {\n  throw new Error(\"CRITICAL: Could not find text payload in AI output.\");\n}\n\n// 2. Strip markdown codeblocks (Gemini loves to add ```json)\nrawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();\n\n// 3. Parse and structure\ntry {\n  const gaps = JSON.parse(rawText);\n  \n  // Defensive logic: If Gemini returned a single object instead of an array, fix it.\n  const gapsArray = Array.isArray(gaps) ? gaps : [gaps];\n  \n  return gapsArray.map(gap => ({ json: gap }));\n} catch (e) {\n  throw new Error(\"AI returned invalid JSON: \" + rawText);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -48
+      ],
+      "id": "70915e98-24a6-4d6a-840f-9e21eb9bf1a2",
+      "name": "[TRANSFORM] Clean_AI_Output"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -976,
+        48
+      ],
+      "id": "7413eaf9-4a98-40a2-9e0a-e07f9c31f89a",
+      "name": "[TRIGGER] Weekly_Cron"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-robotics-er-1.5-preview",
+          "mode": "list",
+          "cachedResultName": "models/gemini-robotics-er-1.5-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Competitor Website Text: {{ $json.text }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "builtInTools": {},
+        "options": {
+          "systemMessage": "You are an elite SEO Strategist with 15 years of experience. Your job is to analyze the text of a competitor's website and identify 3 high-value 'Content Gaps'—topics they are NOT covering well, but should be. You MUST return your answer as a STRICT JSON array of objects. DO NOT wrap the JSON in markdown formatting (no ```json). Output raw JSON only. Format exactly like this: [ { \"title\": \"The Ultimate Guide to [Topic]\", \"target_keyword\": \"specific keyword\", \"keyword_difficulty\": \"Medium\", \"why\": \"1-sentence explanation of the gap\", \"brief\": \"A 3-bullet point markdown outline for the writer.\" } ]"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -304,
+        -48
+      ],
+      "id": "cfe6eb12-b465-440a-bc07-337b48983755",
+      "name": "[AI] Gemini_SEO_Strategist",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "TlKHLst6o45FfMbU",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "team": "90182478142",
+        "space": "90189957404",
+        "folder": "901812440941",
+        "list": "901816213486",
+        "name": "={{ $json.title }}",
+        "additionalFields": {
+          "content": "=Target Keyword: {{ $json.target_keyword }}\nDifficulty: {{ $json.keyword_difficulty }}\n\n---\n\nStrategy / The Why:\n{{ $json.why }}",
+          "status": "to do"
+        }
+      },
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [
+        272,
+        -48
+      ],
+      "id": "bac7e668-2b00-4959-8400-56467b33af4f",
+      "name": "[POST] Create_ClickUp_Tasks",
+      "credentials": {
+        "clickUpApi": {
+          "id": "2XAKsDJ1aQgQi6SB",
+          "name": "ClickUp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "comment",
+        "commentOn": "task",
+        "id": "={{ $json.id }}",
+        "commentText": "=\n\n🚨 AI GENERATED SEO BRIEF 🚨  Target Keyword: {{ $('[TRANSFORM] Clean_AI_Output').item.json.target_keyword }}  {{ $('[TRANSFORM] Clean_AI_Output').item.json.brief }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [
+        496,
+        -48
+      ],
+      "id": "89f4bb31-029f-4a5d-a49b-4530be490f50",
+      "name": "[POST] Attach_SEO_Brief",
+      "credentials": {
+        "clickUpApi": {
+          "id": "2XAKsDJ1aQgQi6SB",
+          "name": "ClickUp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO seo_scraper_dlq (error_type, action_taken, failed_url)\nVALUES ($1, $2, $3);",
+        "options": {
+          "queryReplacement": "={{ [$json.alert, $json.action, $json.failed_url] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -240,
+        144
+      ],
+      "id": "99d44582-c358-4992-8745-16355f4bcee3",
+      "name": "[INSERT] Log_to_DB",
+      "credentials": {
+        "postgres": {
+          "id": "mkNXuIjunaXgWAE1",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "[GET] Fetch_Competitor_Site": {
+      "main": [
+        [
+          {
+            "node": "[TRANSFORM] Extract_Text_Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "[WARN] Trigger_Proxy_Rotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TRANSFORM] Extract_Text_Content": {
+      "main": [
+        [
+          {
+            "node": "[AI] Gemini_SEO_Strategist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TRIGGER] Weekly_Cron": {
+      "main": [
+        [
+          {
+            "node": "[GET] Fetch_Competitor_Site",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[AI] Gemini_SEO_Strategist": {
+      "main": [
+        [
+          {
+            "node": "[TRANSFORM] Clean_AI_Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[TRANSFORM] Clean_AI_Output": {
+      "main": [
+        [
+          {
+            "node": "[POST] Create_ClickUp_Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[POST] Create_ClickUp_Tasks": {
+      "main": [
+        [
+          {
+            "node": "[POST] Attach_SEO_Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "[WARN] Trigger_Proxy_Rotation": {
+      "main": [
+        [
+          {
+            "node": "[INSERT] Log_to_DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "7af62c79-ca64-4a64-9dc7-56edf3a907a5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "558b6b34757c4e9b3d5b402e3e41916faef98d895117813883c4a55f0c14c35a"
+  },
+  "id": "aHGL8jWjdgC5JPJf",
+  "tags": []
+}
